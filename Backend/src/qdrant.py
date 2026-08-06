@@ -1,14 +1,13 @@
-from langchain_community.vectorstores import Qdrant
-from langchain_openai import OpenAIEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from decouple import config
 from langchain_community.document_loaders import WebBaseLoader
-
+from langchain_ollama import OllamaEmbeddings
+from langchain_qdrant import QdrantVectorStore
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from qdrant_client import QdrantClient, models
 
-from decouple import config
-
-qdrant_api_key = config("QDRANT_API_KEY")
+qdrant_api_key = config("QDRANT_API_KEY", default=None)
 qdrant_url = config("QDRANT_URL")
+ollama_url = config("OLLAMA_BASE_URL", default="http://localhost:11434")
 collection_name = "Websites"
 
 client = QdrantClient(
@@ -16,10 +15,23 @@ client = QdrantClient(
     api_key=qdrant_api_key
 )
 
-vector_store = Qdrant(
+# Create collection automatically if it does not exist
+if not client.collection_exists(collection_name=collection_name):
+    client.create_collection(
+        collection_name=collection_name,
+        vectors_config=models.VectorParams(size=768, distance=models.Distance.COSINE)
+    )
+    print(f"Collection '{collection_name}' created successfully.")
+
+embeddings = OllamaEmbeddings(
+    model="nomic-embed-text", 
+    base_url=ollama_url
+)
+
+vector_store = QdrantVectorStore(
     client=client,
-    collection_name=collection_name
-    embedding=OpenAIEmbeddings()
+    collection_name=collection_name,
+    embedding=embeddings
 )
 
 text_splitter = RecursiveCharacterTextSplitter(
@@ -28,15 +40,11 @@ text_splitter = RecursiveCharacterTextSplitter(
     length_function=len
 )
 
-def create_collection(collection_name):
-    client.create_collection(
-        collection_name=collection_name,
-        vectors_config=models.VectorParams(size=1536, distance=models.Distance.COSINE)
-    )
-    print(f"Collection {collection_name} created successfully")
-
 def upload_website_to_collection(url: str):
     loader = WebBaseLoader(url)
     docs = loader.load_and_split(text_splitter)
     for doc in docs:
         doc.metadata = {"source_url": url}
+
+    vector_store.add_documents(docs)
+    return f"Successfully uploaded {len(docs)} documents to collection {collection_name}"
