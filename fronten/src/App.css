@@ -56,7 +56,7 @@ a {
   text-align: center;
 }
 
-.button-container {
+.buttons-container {
   display: flex;
   gap: 10px;
 }

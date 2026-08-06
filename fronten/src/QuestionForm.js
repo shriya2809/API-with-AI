@@ -16,7 +16,6 @@ function QuestionForm() {
     setIsLoading(true);
     try {
       const response = await api.post('/chat', { message: question });
-      // Fixed: /chat returns response.data.answer
       setAnswer(response.data.answer || "No answer returned.");
     } catch (err) {
       console.error("Chat error:", err);
