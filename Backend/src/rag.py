@@ -16,7 +16,7 @@ model = ChatOllama(
 prompt_template = """
 Answer the question based only on the context below, in a concise manner and using bullet points where applicable.
 Cite sources inline using [1], [2], etc. matching the numbered context blocks below.
-If the context doesn't contain enough information to answer, say "I don't have enough information to answer that" instead of guessing.
+If the context doesn't contain enough information to answer then say "I don't have enough information to answer that" instead of guessing.
 
 Context:
 {context}
