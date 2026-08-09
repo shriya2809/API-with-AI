@@ -35,9 +35,10 @@ vector_store = QdrantVectorStore(
 )
 
 text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000,
-    chunk_overlap=20,
-    length_function=len
+    chunk_size=800,
+    chunk_overlap=150,
+    length_function=len,
+    separators=["\n\n", "\n", ". ", " ", ""],  # tries paragraph -> sentence -> word
 )
 
 def upload_website_to_collection(url: str):
