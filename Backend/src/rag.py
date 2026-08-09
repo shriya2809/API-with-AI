@@ -27,8 +27,14 @@ Answer:
 
 prompt = ChatPromptTemplate.from_template(prompt_template)
 
-retriever = vector_store.as_retriever(search_kwargs={"k": 4})
-
+retriever = vector_store.as_retriever(
+    search_type="mmr",
+    search_kwargs={
+        "k": 4,           # final number of chunks returned
+        "fetch_k": 20,     # pool it picks the diverse k from
+        "lambda_mult": 0.5 # 1.0 = pure relevance, 0.0 = pure diversity
+    }
+)
 
 def format_docs_with_sources(docs):
     """Turns retrieved chunks into a numbered, source-tagged block so the LLM can cite them as [1], [2]..."""
