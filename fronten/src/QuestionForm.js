@@ -10,13 +10,44 @@ function QuestionForm() {
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [chatHistory, setChatHistory] = useState([]); // [{ question, answer }]
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setAnswer('');
     setIsLoading(true);
+    const currentQuestion = question;
+
     try {
-      const response = await api.post('/chat', { message: question });
-      setAnswer(response.data.answer || "No answer returned.");
+      const res = await fetch('http://localhost:8000/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: currentQuestion, chat_history: chatHistory }),
+      });
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let fullAnswer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split('\n\n');
+        buffer = chunks.pop(); // last piece may be incomplete, hold it for the next read
+
+        for (const chunk of chunks) {
+          if (!chunk.startsWith('data: ')) continue;
+          const raw = chunk.slice(6);
+          if (raw === '[DONE]') continue;
+          fullAnswer += JSON.parse(raw);
+          setAnswer(fullAnswer); // re-render with each new token
+        }
+      }
+
+      setChatHistory((prev) => [...prev, { question: currentQuestion, answer: fullAnswer }]);
     } catch (err) {
       console.error("Chat error:", err);
       setAnswer("Error getting response.");
@@ -41,6 +72,12 @@ function QuestionForm() {
     }
   };
 
+  const handleNewChat = () => {
+    setChatHistory([]);
+    setAnswer('');
+    setQuestion('');
+  };
+
   return (
     <div className="main-container">
       <form className="form">
@@ -54,6 +91,7 @@ function QuestionForm() {
         <div className="buttons-container">
           <button className="form-button" type="submit" onClick={handleSubmit}>Q&A</button>
           <button className="form-button" type="button" style={{backgroundColor: 'red'}} onClick={handleIndexing}>Index</button>
+          <button className="form-button" type="button" onClick={handleNewChat}>New Chat</button>
         </div>
       </form>
       {isLoading && (

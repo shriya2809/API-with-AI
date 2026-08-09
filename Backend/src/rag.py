@@ -1,7 +1,5 @@
 from langchain_core.prompts.chat import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough, RunnableParallel, RunnableLambda
 from langchain_ollama import ChatOllama
-from operator import itemgetter
 
 from decouple import config
 
@@ -13,12 +11,16 @@ model = ChatOllama(
     temperature=0,
 )
 
-prompt_template = """
-Answer the question based only on the context below, in a concise manner and using bullet points where applicable.
-Cite sources inline using [1], [2], etc. matching the numbered context blocks below.
-If the context doesn't contain enough information to answer then say "I don't have enough information to answer that" instead of guessing.
+condense_prompt = ChatPromptTemplate.from_template("""Given the conversation history and a follow-up question, rewrite the follow-up as a standalone question that includes all necessary context. If there is no history, return the question unchanged.
 
-Context:
+Chat History:
+{chat_history}
+
+Follow-up Question: {question}
+Standalone Question:""")
+
+prompt_template = """
+Answer the question based only on the context below.
 {context}
 
 Question: {question}
@@ -30,14 +32,14 @@ prompt = ChatPromptTemplate.from_template(prompt_template)
 retriever = vector_store.as_retriever(
     search_type="mmr",
     search_kwargs={
-        "k": 4,           # final number of chunks returned
-        "fetch_k": 20,     # pool it picks the diverse k from
-        "lambda_mult": 0.5 # 1.0 = pure relevance, 0.0 = pure diversity
+        "k": 4,
+        "fetch_k": 20,
+        "lambda_mult": 0.5
     }
 )
 
+
 def format_docs_with_sources(docs):
-    """Turns retrieved chunks into a numbered, source-tagged block so the LLM can cite them as [1], [2]..."""
     formatted = []
     for i, doc in enumerate(docs, start=1):
         source = doc.metadata.get("source_url", "unknown source")
@@ -45,39 +47,53 @@ def format_docs_with_sources(docs):
     return "\n\n".join(formatted)
 
 
-def create_chain():
-    chain = (
-        {
-            "docs": retriever,
-            "question": RunnablePassthrough(),
-        }
-        | RunnableParallel({
-            "response": (
-                {
-                    "context": itemgetter("docs") | RunnableLambda(format_docs_with_sources),
-                    "question": itemgetter("question"),
-                }
-                | prompt
-                | model
-            ),
-            "context": itemgetter("docs"),
-        })
-    )
-    return chain
+def format_chat_history(chat_history):
+    if not chat_history:
+        return "None"
+    lines = [f"Human: {turn['question']}\nAI: {turn['answer']}" for turn in chat_history]
+    return "\n".join(lines)
 
 
-def get_answer_and_docs(question: str):
-    chain = create_chain()
-    response = chain.invoke(question)
-    answer = response["response"].content
-    context = response["context"]
+def condense_question(question: str, chat_history: list) -> str:
+    if not chat_history:
+        return question
+    result = model.invoke(condense_prompt.format(
+        chat_history=format_chat_history(chat_history),
+        question=question,
+    ))
+    return result.content
+
+
+def _prepare(question: str, chat_history: list | None):
+    """Runs the non-streaming prep work: condense the question, retrieve docs, build the prompt input."""
+    chat_history = chat_history or []
+    standalone_question = condense_question(question, chat_history)
+    docs = retriever.invoke(standalone_question)
+    context_str = format_docs_with_sources(docs)
+    prompt_input = {"context": context_str, "question": question}
+    return docs, prompt_input
+
+
+def get_answer_and_docs(question: str, chat_history: list | None = None):
+    docs, prompt_input = _prepare(question, chat_history)
+    chain = prompt | model
+    response = chain.invoke(prompt_input)
     sources = list({
         doc.metadata.get("source_url")
-        for doc in context
+        for doc in docs
         if doc.metadata.get("source_url")
     })
     return {
-        "answer": answer,
-        "context": context,
+        "answer": response.content,
+        "context": docs,
         "sources": sources,
     }
+
+
+def stream_answer(question: str, chat_history: list | None = None):
+    """Yields answer tokens as they're generated, for a streaming endpoint."""
+    docs, prompt_input = _prepare(question, chat_history)
+    chain = prompt | model
+    for chunk in chain.stream(prompt_input):
+        if chunk.content:
+            yield chunk.content
