@@ -1,24 +1,23 @@
 from decouple import config
 from agno.agent import Agent
 from agno.models.ollama import Ollama
-from agno.storage.sqlite import SqliteStorage
+from agno.db.sqlite import SqliteDb
 
 from src.qdrant import knowledge_base
 
-# VERIFY: `host` kwarg name against your installed agno version
 ollama_url = config("OLLAMA_BASE_URL", default="http://localhost:11434")
 
-storage = SqliteStorage(table_name="rag_sessions", db_file="tmp/rag_sessions.db")
+db = SqliteDb(db_file="tmp/rag_sessions.db")
 
 
 def build_agent(session_id: str | None = None) -> Agent:
     return Agent(
-        model=Ollama(id="llama3", host=ollama_url),
+        model=Ollama(id="llama3.1", host=ollama_url),
         knowledge=knowledge_base,
-        search_knowledge=True,          # agent decides *itself* whether to search — "Agentic RAG"
-        storage=storage,
+        search_knowledge=True,
+        db=db,
         session_id=session_id,
-        add_history_to_messages=True,
+        add_history_to_context=True,   
         num_history_runs=5,
         instructions=[
             "Answer using only information from your knowledge base.",
@@ -29,15 +28,16 @@ def build_agent(session_id: str | None = None) -> Agent:
     )
 
 
-def _extract_sources(run_response) -> list[str]:
-    """Best-effort: pulls source_url metadata out of the search_knowledge_base tool call, if one happened."""
+def _extract_sources(run_output) -> list[str]:
+    """Best-effort: pulls source_url metadata out of the knowledge-search tool call, if one happened."""
     sources = set()
     try:
-        for tool in (run_response.tools or []):
-            if tool.tool_name == "search_knowledge_base" and tool.result:
+        for tool in (run_output.tools or []):
+            if tool.result:
                 for item in tool.result:
                     if isinstance(item, dict):
-                        src = item.get("meta_data", {}).get("source_url")
+                        meta = item.get("meta_data") or item.get("metadata") or {}
+                        src = meta.get("source_url")
                         if src:
                             sources.add(src)
     except Exception:

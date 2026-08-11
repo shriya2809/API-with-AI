@@ -7,3 +7,4 @@ database.sqlite3-shm
 database.sqlite3-wal
 Frontend
 react
+tmp

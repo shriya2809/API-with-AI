@@ -10,19 +10,18 @@ function QuestionForm() {
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [chatHistory, setChatHistory] = useState([]); // [{ question, answer }]
+  const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setAnswer('');
     setIsLoading(true);
-    const currentQuestion = question;
 
     try {
       const res = await fetch('http://localhost:8000/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: currentQuestion, chat_history: chatHistory }),
+        body: JSON.stringify({ message: question, session_id: sessionId }),
       });
 
       const reader = res.body.getReader();
@@ -36,18 +35,16 @@ function QuestionForm() {
 
         buffer += decoder.decode(value, { stream: true });
         const chunks = buffer.split('\n\n');
-        buffer = chunks.pop(); // last piece may be incomplete, hold it for the next read
+        buffer = chunks.pop();
 
         for (const chunk of chunks) {
           if (!chunk.startsWith('data: ')) continue;
           const raw = chunk.slice(6);
           if (raw === '[DONE]') continue;
           fullAnswer += JSON.parse(raw);
-          setAnswer(fullAnswer); // re-render with each new token
+          setAnswer(fullAnswer);
         }
       }
-
-      setChatHistory((prev) => [...prev, { question: currentQuestion, answer: fullAnswer }]);
     } catch (err) {
       console.error("Chat error:", err);
       setAnswer("Error getting response.");
@@ -62,7 +59,6 @@ function QuestionForm() {
     setIsLoading(true);
     try {
       const response = await api.post('/indexing', null, { params: { url: question } });
-      // Fixed: /indexing returns response.data.response
       setAnswer(response.data.response || response.data.message || "Successfully indexed!");
     } catch (err) {
       console.error("Indexing error:", err);
@@ -73,7 +69,7 @@ function QuestionForm() {
   };
 
   const handleNewChat = () => {
-    setChatHistory([]);
+    setSessionId(crypto.randomUUID());
     setAnswer('');
     setQuestion('');
   };
@@ -81,11 +77,11 @@ function QuestionForm() {
   return (
     <div className="main-container">
       <form className="form">
-        <input 
-          className="form-input" 
-          type="text" 
-          value={question} 
-          onChange={(e) => setQuestion(e.target.value)} 
+        <input
+          className="form-input"
+          type="text"
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
           placeholder="Ask a question or enter a URL..."
         />
         <div className="buttons-container">
