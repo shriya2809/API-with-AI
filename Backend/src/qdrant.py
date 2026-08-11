@@ -1,51 +1,30 @@
 from decouple import config
-from langchain_community.document_loaders import WebBaseLoader
-from langchain_ollama import OllamaEmbeddings
-from langchain_qdrant import QdrantVectorStore
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from qdrant_client import QdrantClient, models
+from agno.knowledge.knowledge import Knowledge
+from agno.knowledge.embedder.ollama import OllamaEmbedder
+from agno.vectordb.qdrant import Qdrant
 
 qdrant_api_key = config("QDRANT_API_KEY", default=None)
 qdrant_url = config("QDRANT_URL")
 ollama_url = config("OLLAMA_BASE_URL", default="http://localhost:11434")
 collection_name = "Websites"
 
-client = QdrantClient(
+# VERIFY: kwarg names (id vs model, host vs base_url) against your installed agno version
+embedder = OllamaEmbedder(id="nomic-embed-text", host=ollama_url)
+
+vector_db = Qdrant(
+    collection=collection_name,
     url=qdrant_url,
-    api_key=qdrant_api_key
+    api_key=qdrant_api_key,
+    embedder=embedder,
 )
 
-# Create collection automatically if it does not exist
-if not client.collection_exists(collection_name=collection_name):
-    client.create_collection(
-        collection_name=collection_name,
-        vectors_config=models.VectorParams(size=768, distance=models.Distance.COSINE)
-    )
-    print(f"Collection '{collection_name}' created successfully.")
-
-embeddings = OllamaEmbeddings(
-    model="nomic-embed-text", 
-    base_url=ollama_url
+# Agno's Knowledge object owns chunking, embedding, and Qdrant collection creation —
+# no manual RecursiveCharacterTextSplitter or QdrantClient.create_collection needed.
+knowledge_base = Knowledge(
+    vector_db=vector_db,
 )
 
-vector_store = QdrantVectorStore(
-    client=client,
-    collection_name=collection_name,
-    embedding=embeddings
-)
-
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=800,
-    chunk_overlap=150,
-    length_function=len,
-    separators=["\n\n", "\n", ". ", " ", ""],  # tries paragraph -> sentence -> word
-)
 
 def upload_website_to_collection(url: str):
-    loader = WebBaseLoader(url)
-    docs = loader.load_and_split(text_splitter)
-    for doc in docs:
-        doc.metadata = {"source_url": url}
-
-    vector_store.add_documents(docs)
-    return f"Successfully uploaded {len(docs)} documents to collection {collection_name}"
+    knowledge_base.add_content(url=url, metadata={"source_url": url})
+    return f"Successfully indexed {url} into the '{collection_name}' knowledge base"
