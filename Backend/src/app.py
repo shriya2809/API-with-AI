@@ -1,21 +1,19 @@
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, StreamingResponse
-from src.rag import get_answer_and_docs, stream_answer
+from src.agent import get_answer_and_docs, stream_answer
 from src.qdrant import upload_website_to_collection
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 import json
 
 app = FastAPI(
     title="RAG API",
-    description="A simple RAG API",
-    version="0.1",
+    description="An Agno-powered RAG API",
+    version="0.2",
 )
 
-origins = [
-    "http://localhost:3000"
-]
+origins = ["http://localhost:3000"]
 
 app.add_middleware(
     CORSMiddleware,
@@ -23,38 +21,26 @@ app.add_middleware(
     allow_methods=["*"],
 )
 
-class ChatTurn(BaseModel):
-    question: str
-    answer: str
 
 class Message(BaseModel):
     message: str
-    chat_history: Optional[List[ChatTurn]] = []
+    session_id: Optional[str] = None
 
 
 @app.post("/chat", description="Chat with the RAG API through this endpoint")
 def chat(message: Message):
-    history = [turn.dict() for turn in message.chat_history]
-    response = get_answer_and_docs(message.message, chat_history=history)
-
-    response_content = {
+    response = get_answer_and_docs(message.message, session_id=message.session_id)
+    return JSONResponse(content={
         "question": message.message,
         "answer": response["answer"],
         "sources": response["sources"],
-        "documents": [
-            doc.dict() for doc in response["context"]
-        ]
-    }
-
-    return JSONResponse(content=response_content, status_code=200)
+    }, status_code=200)
 
 
 @app.post("/chat/stream", description="Chat with the RAG API, streaming tokens as they're generated")
 def chat_stream(message: Message):
-    history = [turn.dict() for turn in message.chat_history]
-
     def event_generator():
-        for token in stream_answer(message.message, chat_history=history):
+        for token in stream_answer(message.message, session_id=message.session_id):
             yield f"data: {json.dumps(token)}\n\n"
         yield "data: [DONE]\n\n"
 
